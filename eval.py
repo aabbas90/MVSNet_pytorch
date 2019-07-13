@@ -19,7 +19,10 @@ import cv2
 from plyfile import PlyData, PlyElement
 from PIL import Image
 from IO import *
+import matplotlib.pyplot as plt
 import pdb
+from models.mvsnet import * 
+
 
 cudnn.benchmark = True
 
@@ -71,26 +74,36 @@ def save_depth():
     with torch.no_grad():
         for batch_idx, sample in enumerate(TestImgLoader):
             orig_images = torch.unbind(sample["imgs"], 1)
-            ext_matrices = torch.unbind(sample["ext_matrices"], 1)
-            int_matrices = torch.unbind(sample["int_matrices"], 1)
-            ref_img = orig_images[0]
-            n_img = orig_images[1]
-            ref_ext = ext_matrices[0]
-            ref_int = int_matrices[0]
-            n_ext = ext_matrices[1]
-            n_int = int_matrices[1]
+            ext_matrices = sample["ext_matrices"]
+            int_matrices = sample["int_matrices"]
+            ref_img = orig_images[0].squeeze().numpy()
+            n_img = orig_images[1].squeeze().numpy()
+            ref_ext = ext_matrices[0].squeeze().numpy()
+            ref_int = int_matrices[0].squeeze().numpy()
+            n_ext = ext_matrices[1].squeeze().numpy()
+            n_int = int_matrices[1].squeeze().numpy()
             sample_cuda = tocuda(sample)
             outputs = model(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"])
             outputs = tensor2numpy(outputs)
             del sample_cuda
-            ref_depth = outputs["depth"]
-            x = np.linspace(0, image.shape[1], image.shape[1], axis = -1)   
-            y = np.linspace(0, image.shape[0], image.shape[0], axis = -1)
+            ref_depth = cv2.resize(outputs["depth"].squeeze(), (ref_img.shape[2],ref_img.shape[1]))
+            x = np.linspace(0, ref_img.shape[2], ref_img.shape[2], axis = -1)   
+            y = np.linspace(0, ref_img.shape[1], ref_img.shape[1], axis = -1)
             xv, yv = np.meshgrid(x, y)
-            W = PixelCoordToWorldCoord(ref_int, ref_ext[:3,:3], ref_ext[:3, 3], xv.flatten(), yv.flatten(), ref_depth.flatten() + 1)
-            xp, yp = WorldCoordTopixelCoord(ref_int, ref_ext[:3,:3], ref_ext[:3, 3], W)
-            pdb.set_trace()
+            W = PixelCoordToWorldCoord(ref_int, ref_ext[:3,:3], ref_ext[:3, 3:4], xv, yv, ref_depth)
+            xp, yp = WorldCoordTopixelCoord(n_int, n_ext[:3,:3], n_ext[:3, 3:4], W)
 
+#            xp, yp = WorldCoordTopixelCoord(ref_int, ref_ext[:3,:3], ref_ext[:3, 3:4], W)
+            projected_img = GetImageAtPixelCoordinates(ref_img, xp, yp)
+            fig = plt.figure()
+            plt.subplot(1, 3, 1)
+            plt.imshow(np.swapaxes(ref_img, 0, 2).swapaxes(0,1))
+            plt.subplot(1, 3, 2)
+            plt.imshow(np.swapaxes(n_img, 0, 2).swapaxes(0,1))
+            plt.subplot(1, 3, 3)
+            plt.imshow(np.swapaxes(projected_img, 0, 2).swapaxes(0,1))
+            plt.show()
+            plt.tight_layout()
             print('Iter {}/{}'.format(batch_idx, len(TestImgLoader)))
             filenames = sample["filename"]
 
@@ -229,7 +242,6 @@ def filter_depth(scan_folder, out_folder, plyfilename):
                                                                                     geo_mask.mean(), final_mask.mean()))
 
         if args.display:
-            import matplotlib.pyplot as plt
             plt.imshow(ref_img[:, :, ::-1])
             plt.show()
             plt.imshow(ref_depth_est / 800)

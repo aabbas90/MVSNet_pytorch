@@ -2,7 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .module import *
-
+import numpy as np
+import scipy.interpolate
+from scipy import ndimage
+import matplotlib.pyplot as plt
+import pdb
 
 class FeatureNet(nn.Module):
     def __init__(self):
@@ -166,12 +170,39 @@ def PixelCoordToWorldCoord(K, R, t, u, v, depth):
     x = np.divide((c - np.multiply(b,y)), a)
     z = depth
     C = np.concatenate(([x], [y], [z]), axis = 0)
-    W = np.matmul(R.T, C - t)
-    return W.T
+    # W = np.matmul(R.T, C - t[:,:,np.newaxis])
+    
+    W1 = np.sum(R[:,0:1,np.newaxis] * (C - t[:,:,np.newaxis]), axis = 0)
+    W2 = np.sum(R[:,1:2,np.newaxis] * (C - t[:,:,np.newaxis]), axis = 0)
+    W3 = np.sum(R[:,2:3,np.newaxis] * (C - t[:,:,np.newaxis]), axis = 0)
+    W = np.stack((W1, W2, W3), axis = 0)
+    return W
 
 def WorldCoordTopixelCoord(K, R, t, W):
-    C = t + np.matmul(R, W.T)
-    p = np.matmul(K, C)
-    Xp = np.divide(p[0:1, :], p[2:3, :])
-    Yp = np.divide(p[1:2, :], p[2:3, :])
+    # C = t + np.matmul(R, W.T)
+    R1 = R[0:1, :].T
+    R2 = R[1:2, :].T
+    R3 = R[2:3, :].T
+    
+    C1 = np.sum(R1[:,:,np.newaxis] * W, axis = 0)
+    C2 = np.sum(R2[:,:,np.newaxis] * W, axis = 0)
+    C3 = np.sum(R3[:,:,np.newaxis] * W, axis = 0)
+    C = t[:,:,np.newaxis] + np.stack((C1, C2, C3), axis = 0)
+    # p = np.matmul(K, C)
+    K1 = K[0:1, :].T
+    K2 = K[1:2, :].T
+    K3 = K[2:3, :].T
+    
+    P1 = np.sum(K1[:,:,np.newaxis] * C, axis = 0)
+    P2 = np.sum(K2[:,:,np.newaxis] * C, axis = 0)
+    P3 = np.sum(K3[:,:,np.newaxis] * C, axis = 0)
+ 
+    Xp = np.divide(P1, P3)
+    Yp = np.divide(P2, P3)
     return Xp, Yp
+
+def GetImageAtPixelCoordinates(image, xp, yp):
+    pr = ndimage.map_coordinates(np.squeeze(image[0,:,:]), [yp, xp], order=1)
+    pg = ndimage.map_coordinates(np.squeeze(image[1,:,:]), [yp, xp], order=1)
+    pb = ndimage.map_coordinates(np.squeeze(image[2,:,:]), [yp, xp], order=1)
+    return np.stack((pr, pg, pb), axis = 0)
