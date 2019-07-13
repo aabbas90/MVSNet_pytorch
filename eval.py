@@ -21,7 +21,7 @@ from PIL import Image
 from IO import *
 import pdb
 
-cudnn.benchmark = False
+cudnn.benchmark = True
 
 parser = argparse.ArgumentParser(description='Predict depth, filter, and fuse. May be different from the original implementation')
 parser.add_argument('--model', default='mvsnet', help='select model')
@@ -53,26 +53,27 @@ def save_depth():
 
     # model
     model = MVSNet(refine=False)
-    # model = nn.DataParallel(model)
-    # model.cuda()
+    model = nn.DataParallel(model)
+    model.cuda()
 
     # load checkpoint file specified by args.loadckpt
-    print("loading model {}".format(args.loadckpt))
-    from collections import OrderedDict
-    new_state_dict = OrderedDict()
-    state_dict = torch.load(args.loadckpt, map_location='cpu')
-    for k, v in state_dict["model"].items():
-        name = k.replace("module.", "")  # remove module.
-        new_state_dict[name] = v
-    model.load_state_dict(new_state_dict) #, strict=False)
+    # print("loading model {}".format(args.loadckpt))
+    # from collections import OrderedDict
+    # new_state_dict = OrderedDict()
+    state_dict = torch.load(args.loadckpt)
+    # for k, v in state_dict["model"].items():
+    #     name = k.replace("module.", "")  # remove module.
+    #     new_state_dict[name] = v
+    # model.load_state_dict(new_state_dict) #, strict=False)
+    model.load_state_dict(state_dict['model']) #, strict=False)
     model.eval()
 
     with torch.no_grad():
         for batch_idx, sample in enumerate(TestImgLoader):
-            sample_cuda = sample
+            sample_cuda = tocuda(sample)
             outputs = model(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"])
             outputs = tensor2numpy(outputs)
-            # del sample_cuda
+            del sample_cuda
             print('Iter {}/{}'.format(batch_idx, len(TestImgLoader)))
             filenames = sample["filename"]
 
@@ -211,13 +212,16 @@ def filter_depth(scan_folder, out_folder, plyfilename):
                                                                                     geo_mask.mean(), final_mask.mean()))
 
         if args.display:
-            import cv2
-            cv2.imshow('ref_img', ref_img[:, :, ::-1])
-            cv2.imshow('ref_depth', ref_depth_est / 800)
-            cv2.imshow('ref_depth * photo_mask', ref_depth_est * photo_mask.astype(np.float32) / 800)
-            cv2.imshow('ref_depth * geo_mask', ref_depth_est * geo_mask.astype(np.float32) / 800)
-            cv2.imshow('ref_depth * mask', ref_depth_est * final_mask.astype(np.float32) / 800)
-            cv2.waitKey(0)
+            import matplotlib.pyplot as plt
+            plt.imshow(ref_img[:, :, ::-1])
+            plt.show()
+            plt.imshow(ref_depth_est / 800)
+            plt.show()
+            plt.imshow(ref_depth_est * photo_mask.astype(np.float32) / 800)
+            plt.show()
+            plt.imshow(ref_depth_est * geo_mask.astype(np.float32) / 800)
+            plt.show()
+            plt.imshow(ref_depth_est * final_mask.astype(np.float32) / 800)
 
         height, width = depth_est_averaged.shape[:2]
         x, y = np.meshgrid(np.arange(0, width), np.arange(0, height))
@@ -261,12 +265,12 @@ if __name__ == '__main__':
     # step1. save all the depth maps and the masks in outputs directory
     save_depth()
 
-    with open(args.testlist) as f:
-        scans = f.readlines()
-        scans = [line.rstrip() for line in scans]
-    for scan in scans:
-        scan_id = int(scan[4:])
-        scan_folder = os.path.join(args.testpath, scan)
-        out_folder = os.path.join(args.outdir, scan)
-        # step2. filter saved depth maps with photometric confidence maps and geometric constraints
-        filter_depth(scan_folder, out_folder, os.path.join(args.outdir, 'mvsnet{:0>3}_l3.ply'.format(scan_id)))
+    # with open(args.testlist) as f:
+    #     scans = f.readlines()
+    #     scans = [line.rstrip() for line in scans]
+    # for scan in scans:
+    #     scan_id = int(scan[4:])
+    #     scan_folder = os.path.join(args.testpath, scan)
+    #     out_folder = os.path.join(args.outdir, scan)
+    #     # step2. filter saved depth maps with photometric confidence maps and geometric constraints
+    #     filter_depth(scan_folder, out_folder, os.path.join(args.outdir, 'mvsnet{:0>3}_l3.ply'.format(scan_id)))

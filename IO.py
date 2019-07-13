@@ -19,7 +19,6 @@ def read_camera_parameters(filename):
 
 # read an image
 def read_img(filename):
-    pdb.set_trace()
     img = Image.open(filename)
     # scale 0~255 to 0~1
     np_img = np.array(img, dtype=np.float32) / 255.
