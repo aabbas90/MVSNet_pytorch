@@ -27,7 +27,7 @@ parser = argparse.ArgumentParser(description='Predict depth, filter, and fuse. M
 parser.add_argument('--model', default='mvsnet', help='select model')
 
 parser.add_argument('--dataset', default='dtu_yao_eval', help='select dataset')
-parser.add_argument('--testpath', default='TEST_DATA_FOLDER/')
+parser.add_argument('--testpath', default='TEST_DATA_FOLDER_SIMULATED/')
 parser.add_argument('--testlist', default='lists/dtu/test9.txt')
 
 parser.add_argument('--batch_size', type=int, default=1, help='testing batch size')
