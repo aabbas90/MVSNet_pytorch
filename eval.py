@@ -18,101 +18,61 @@ from datasets.data_io import read_pfm, save_pfm
 import cv2
 from plyfile import PlyData, PlyElement
 from PIL import Image
+from IO import *
+import pdb
 
-cudnn.benchmark = True
+cudnn.benchmark = False
 
 parser = argparse.ArgumentParser(description='Predict depth, filter, and fuse. May be different from the original implementation')
 parser.add_argument('--model', default='mvsnet', help='select model')
 
 parser.add_argument('--dataset', default='dtu_yao_eval', help='select dataset')
-parser.add_argument('--testpath', help='testing data path')
-parser.add_argument('--testlist', help='testing scan list')
+parser.add_argument('--testpath', default='TEST_DATA_FOLDER/')
+parser.add_argument('--testlist', default='lists/dtu/test9.txt')
 
 parser.add_argument('--batch_size', type=int, default=1, help='testing batch size')
-parser.add_argument('--numdepth', type=int, default=192, help='the number of depth values')
+parser.add_argument('--numdepth', type=int, default=128, help='the number of depth values')
+parser.add_argument('--numviews', type=int, default=5, help='num views')
 parser.add_argument('--interval_scale', type=float, default=1.06, help='the depth interval scale')
 
-parser.add_argument('--loadckpt', default=None, help='load a specific checkpoint')
+parser.add_argument('--loadckpt', default='model_000014.ckpt', help='load a specific checkpoint')
 parser.add_argument('--outdir', default='./outputs', help='output dir')
-parser.add_argument('--display', action='store_true', help='display depth images and masks')
+parser.add_argument('--display', default = True, action='store_true', help='display depth images and masks')
 
 # parse arguments and check
 args = parser.parse_args()
 print("argv:", sys.argv[1:])
 print_args(args)
 
-
-# read intrinsics and extrinsics
-def read_camera_parameters(filename):
-    with open(filename) as f:
-        lines = f.readlines()
-        lines = [line.rstrip() for line in lines]
-    # extrinsics: line [1,5), 4x4 matrix
-    extrinsics = np.fromstring(' '.join(lines[1:5]), dtype=np.float32, sep=' ').reshape((4, 4))
-    # intrinsics: line [7-10), 3x3 matrix
-    intrinsics = np.fromstring(' '.join(lines[7:10]), dtype=np.float32, sep=' ').reshape((3, 3))
-    # TODO: assume the feature is 1/4 of the original image size
-    intrinsics[:2, :] /= 4
-    return intrinsics, extrinsics
-
-
-# read an image
-def read_img(filename):
-    img = Image.open(filename)
-    # scale 0~255 to 0~1
-    np_img = np.array(img, dtype=np.float32) / 255.
-    return np_img
-
-
-# read a binary mask
-def read_mask(filename):
-    return read_img(filename) > 0.5
-
-
-# save a binary mask
-def save_mask(filename, mask):
-    assert mask.dtype == np.bool
-    mask = mask.astype(np.uint8) * 255
-    Image.fromarray(mask).save(filename)
-
-
-# read a pair file, [(ref_view1, [src_view1-1, ...]), (ref_view2, [src_view2-1, ...]), ...]
-def read_pair_file(filename):
-    data = []
-    with open(filename) as f:
-        num_viewpoint = int(f.readline())
-        # 49 viewpoints
-        for view_idx in range(num_viewpoint):
-            ref_view = int(f.readline().rstrip())
-            src_views = [int(x) for x in f.readline().rstrip().split()[1::2]]
-            data.append((ref_view, src_views))
-    return data
-
-
 # run MVS model to save depth maps and confidence maps
 def save_depth():
     # dataset, dataloader
     MVSDataset = find_dataset_def(args.dataset)
-    test_dataset = MVSDataset(args.testpath, args.testlist, "test", 5, args.numdepth, args.interval_scale)
+    test_dataset = MVSDataset(args.testpath, args.testlist, "test", args.numviews, args.numdepth, args.interval_scale)
     TestImgLoader = DataLoader(test_dataset, args.batch_size, shuffle=False, num_workers=4, drop_last=False)
 
     # model
     model = MVSNet(refine=False)
-    model = nn.DataParallel(model)
-    model.cuda()
+    # model = nn.DataParallel(model)
+    # model.cuda()
 
     # load checkpoint file specified by args.loadckpt
     print("loading model {}".format(args.loadckpt))
-    state_dict = torch.load(args.loadckpt)
-    model.load_state_dict(state_dict['model'])
+    from collections import OrderedDict
+    new_state_dict = OrderedDict()
+    state_dict = torch.load(args.loadckpt, map_location='cpu')
+    for k, v in state_dict["model"].items():
+        name = k.replace("module.", "")  # remove module.
+        new_state_dict[name] = v
+    model.load_state_dict(new_state_dict) #, strict=False)
     model.eval()
 
     with torch.no_grad():
         for batch_idx, sample in enumerate(TestImgLoader):
-            sample_cuda = tocuda(sample)
+            sample_cuda = sample
             outputs = model(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"])
             outputs = tensor2numpy(outputs)
-            del sample_cuda
+            # del sample_cuda
             print('Iter {}/{}'.format(batch_idx, len(TestImgLoader)))
             filenames = sample["filename"]
 
@@ -299,12 +259,11 @@ def filter_depth(scan_folder, out_folder, plyfilename):
 
 if __name__ == '__main__':
     # step1. save all the depth maps and the masks in outputs directory
-    # save_depth()
+    save_depth()
 
     with open(args.testlist) as f:
         scans = f.readlines()
         scans = [line.rstrip() for line in scans]
-
     for scan in scans:
         scan_id = int(scan[4:])
         scan_folder = os.path.join(args.testpath, scan)

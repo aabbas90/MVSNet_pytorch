@@ -3,11 +3,11 @@ import numpy as np
 import os
 from PIL import Image
 from datasets.data_io import *
-
+import pdb
 
 # the DTU dataset preprocessed by Yao Yao (only for training)
 class MVSDataset(Dataset):
-    def __init__(self, datapath, listfile, mode, nviews, ndepths=192, interval_scale=1.06, **kwargs):
+    def __init__(self, datapath, listfile, mode, nviews, ndepths=192, interval_scale=1.06, max_dim = 768, **kwargs):
         super(MVSDataset, self).__init__()
         self.datapath = datapath
         self.listfile = listfile
@@ -15,6 +15,7 @@ class MVSDataset(Dataset):
         self.nviews = nviews
         self.ndepths = ndepths
         self.interval_scale = interval_scale
+        self.max_dim = max_dim
 
         assert self.mode in ["train", "val", "test"]
         self.metas = self.build_list()
@@ -62,10 +63,32 @@ class MVSDataset(Dataset):
         # scale 0~255 to 0~1
         np_img = np.array(img, dtype=np.float32) / 255.
         return np_img
+        
+    def resize_img(self, img, w, h):
+        return cv2.resize(img, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    def determine_new_h_w(self, orig_w, orig_h):
+        orig_max_dim = np.max((orig_w, orig_h))
+        scale_factor = self.max_dim / orig_max_dim.astype(float) 
+        new_w = int(np.round((orig_w / scale_factor) / 32.0) * 32)
+        new_h = int(np.round((orig_h / scale_factor) / 32.0) * 32)
+        scale_w = new_w / orig_w
+        scale_h = new_h / orig_h
+        return new_w, new_h, scale_w, scale_h
 
     def read_depth(self, filename):
         # read pfm depth file
         return np.array(read_pfm(filename)[0], dtype=np.float32)
+
+    def scale_intrinsic(self, intrinsics, scale_w, scale_h):
+        new_cam = np.copy(intrinsics)
+        new_cam[1][0][0] = intrinsics[0][0] * scale_w
+        new_cam[1][1][1] = intrinsics[1][1] * scale_h
+        # principle point:
+        new_cam[1][0][2] = intrinsics[0][2] * scale_w
+        new_cam[1][1][2] = intrinsics[1][2] * scale_h
+        pdb.set_trace()
+        return new_cam
 
     def __getitem__(self, idx):
         meta = self.metas[idx]
@@ -77,6 +100,7 @@ class MVSDataset(Dataset):
         mask = None
         depth = None
         depth_values = None
+        new_w = None
         proj_matrices = []
 
         for i, vid in enumerate(view_ids):
@@ -87,12 +111,18 @@ class MVSDataset(Dataset):
             depth_filename = os.path.join(self.datapath, 'Depths/{}_train/depth_map_{:0>4}.pfm'.format(scan, vid))
             proj_mat_filename = os.path.join(self.datapath, 'Cameras/train/{:0>8}_cam.txt').format(vid)
 
-            imgs.append(self.read_img(img_filename))
+            orig_image = self.read_img(img_filename)
+            if new_w is None:
+                new_w, new_h, scale_w, scale_h = self.determine_new_h_w(orig_image.shape[1], orig_image.shape[0])
+
+            resized_image = self.resize_img(orig_image, new_w, new_h)
+            imgs.append(resized_image)
             intrinsics, extrinsics, depth_min, depth_interval = self.read_cam_file(proj_mat_filename)
+            scaled_intrinsics = self.scale_intrinsic(intrinsics, scale_w, scale_h)
 
             # multiply intrinsics and extrinsics to get projection matrix
             proj_mat = extrinsics.copy()
-            proj_mat[:3, :4] = np.matmul(intrinsics, proj_mat[:3, :4])
+            proj_mat[:3, :4] = np.matmul(scaled_intrinsics, proj_mat[:3, :4])
             proj_matrices.append(proj_mat)
 
             if i == 0:  # reference view
