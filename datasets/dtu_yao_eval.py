@@ -97,6 +97,8 @@ class MVSDataset(Dataset):
         depth = None
         depth_values = None
         proj_matrices = []
+        int_matrices = []
+        ext_matrices = []
         new_w = None
 
         for i, vid in enumerate(view_ids):
@@ -115,6 +117,8 @@ class MVSDataset(Dataset):
             proj_mat = extrinsics.copy()
             proj_mat[:3, :4] = np.matmul(intrinsics, proj_mat[:3, :4])
             proj_matrices.append(proj_mat)
+            int_matrices.append(intrinsics)
+            ext_matrices.append(extrinsics)
 
             if i == 0:  # reference view
                 depth_values = np.arange(depth_min, depth_interval * (self.ndepths - 0.5) + depth_min, depth_interval,
@@ -126,7 +130,9 @@ class MVSDataset(Dataset):
         return {"imgs": imgs,
                 "proj_matrices": proj_matrices,
                 "depth_values": depth_values,
-                "filename": scan + '/{}/' + '{:0>8}'.format(view_ids[0]) + "{}"}
+                "filename": scan + '/{}/' + '{:0>8}'.format(view_ids[0]) + "{}",
+                "int_matrices": int_matrices,
+                "ext_matrices": ext_matrices}
 
 
 if __name__ == "__main__":

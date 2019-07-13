@@ -70,24 +70,41 @@ def save_depth():
 
     with torch.no_grad():
         for batch_idx, sample in enumerate(TestImgLoader):
+            orig_images = torch.unbind(sample["imgs"], 1)
+            ext_matrices = torch.unbind(sample["ext_matrices"], 1)
+            int_matrices = torch.unbind(sample["int_matrices"], 1)
+            ref_img = orig_images[0]
+            n_img = orig_images[1]
+            ref_ext = ext_matrices[0]
+            ref_int = int_matrices[0]
+            n_ext = ext_matrices[1]
+            n_int = int_matrices[1]
             sample_cuda = tocuda(sample)
             outputs = model(sample_cuda["imgs"], sample_cuda["proj_matrices"], sample_cuda["depth_values"])
             outputs = tensor2numpy(outputs)
             del sample_cuda
+            ref_depth = outputs["depth"]
+            x = np.linspace(0, image.shape[1], image.shape[1], axis = -1)   
+            y = np.linspace(0, image.shape[0], image.shape[0], axis = -1)
+            xv, yv = np.meshgrid(x, y)
+            W = PixelCoordToWorldCoord(ref_int, ref_ext[:3,:3], ref_ext[:3, 3], xv.flatten(), yv.flatten(), ref_depth.flatten() + 1)
+            xp, yp = WorldCoordTopixelCoord(ref_int, ref_ext[:3,:3], ref_ext[:3, 3], W)
+            pdb.set_trace()
+
             print('Iter {}/{}'.format(batch_idx, len(TestImgLoader)))
             filenames = sample["filename"]
 
-            # save depth maps and confidence maps
-            for filename, depth_est, photometric_confidence in zip(filenames, outputs["depth"],
-                                                                   outputs["photometric_confidence"]):
-                depth_filename = os.path.join(args.outdir, filename.format('depth_est', '.pfm'))
-                confidence_filename = os.path.join(args.outdir, filename.format('confidence', '.pfm'))
-                os.makedirs(depth_filename.rsplit('/', 1)[0], exist_ok=True)
-                os.makedirs(confidence_filename.rsplit('/', 1)[0], exist_ok=True)
-                # save depth maps
-                save_pfm(depth_filename, depth_est)
-                # save confidence maps
-                save_pfm(confidence_filename, photometric_confidence)
+            # # save depth maps and confidence maps
+            # for filename, depth_est, photometric_confidence in zip(filenames, outputs["depth"],
+            #                                                        outputs["photometric_confidence"]):
+            #     depth_filename = os.path.join(args.outdir, filename.format('depth_est', '.pfm'))
+            #     confidence_filename = os.path.join(args.outdir, filename.format('confidence', '.pfm'))
+            #     os.makedirs(depth_filename.rsplit('/', 1)[0], exist_ok=True)
+            #     os.makedirs(confidence_filename.rsplit('/', 1)[0], exist_ok=True)
+            #     # save depth maps
+            #     save_pfm(depth_filename, depth_est)
+            #     # save confidence maps
+            #     save_pfm(confidence_filename, photometric_confidence)
 
 
 # project the reference point cloud into the source view, then project back

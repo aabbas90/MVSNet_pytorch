@@ -152,3 +152,26 @@ class MVSNet(nn.Module):
 def mvsnet_loss(depth_est, depth_gt, mask):
     mask = mask > 0.5
     return F.smooth_l1_loss(depth_est[mask], depth_gt[mask], size_average=True)
+
+def PixelCoordToWorldCoord(K, R, t, u, v, depth):
+    a = np.multiply(K[2,0], u) - K[0,0]
+    b = np.multiply(K[2,1], u) - K[0,1]
+    c = np.multiply(depth, (K[0,2] - np.multiply(K[2,2], u)))
+
+    g = np.multiply(K[2,0], v) - K[0,1]
+    h = np.multiply(K[2,1], v) - K[1,1]
+    l = np.multiply(depth, (K[1,2] - np.multiply(K[2,2], v)))
+
+    y = np.divide(l - np.divide(np.multiply(g, c), a), h - np.divide(np.multiply(g, b), a))
+    x = np.divide((c - np.multiply(b,y)), a)
+    z = depth
+    C = np.concatenate(([x], [y], [z]), axis = 0)
+    W = np.matmul(R.T, C - t)
+    return W.T
+
+def WorldCoordTopixelCoord(K, R, t, W):
+    C = t + np.matmul(R, W.T)
+    p = np.matmul(K, C)
+    Xp = np.divide(p[0:1, :], p[2:3, :])
+    Yp = np.divide(p[1:2, :], p[2:3, :])
+    return Xp, Yp
