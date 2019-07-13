@@ -9,6 +9,8 @@ This is an unofficial Pytorch implementation of MVSNet
 ### Environment
 * python 3.6 (Anaconda)
 * pytorch 1.0.1
+* OpenCV
+* Numpy
 
 ### Training
 
